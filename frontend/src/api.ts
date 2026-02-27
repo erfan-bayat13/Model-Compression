@@ -54,6 +54,10 @@ export function getJobStatus(jobId: string) {
   return apiFetch(`/jobs/${jobId}/status`);
 }
 
+export function getJobResult(jobId: string) {
+  return apiFetch(`/jobs/${jobId}/result`);
+}
+
 export function getDownloadUrl(jobId: string) {
   return apiFetch(`/jobs/${jobId}/download`);
 }

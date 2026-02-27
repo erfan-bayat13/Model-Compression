@@ -34,6 +34,11 @@ class DownloadResponse(BaseModel):
     download_url: str
 
 
+class JobResultResponse(BaseModel):
+    job_id: str
+    download_url: str
+
+
 @router.post("/compress", response_model=JobLaunchResponse)
 def compress(body: CompressionRequest) -> JobLaunchResponse:
     try:
@@ -67,6 +72,29 @@ def job_status(job_id: str) -> JobStatusResponse:
         status=info["status"],
         created_at=info["created_at"],
     )
+
+
+@router.get("/jobs/{job_id}/result", response_model=JobResultResponse)
+def job_result(job_id: str) -> JobResultResponse:
+    sm = _make_sagemaker()
+
+    try:
+        info = sm.get_job_status(job_id)
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+    if info["status"] != "Completed":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Job is not completed (status: {info['status']}).",
+        )
+
+    settings = get_settings()
+    url = StorageClient(region=settings.aws_region).generate_presigned_url(
+        bucket=settings.s3_bucket,
+        job_id=job_id,
+    )
+    return JobResultResponse(job_id=job_id, download_url=url)
 
 
 @router.get("/jobs/{job_id}/download", response_model=DownloadResponse)

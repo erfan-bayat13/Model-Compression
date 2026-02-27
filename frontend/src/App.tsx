@@ -2,6 +2,8 @@ import { Route, Routes } from "react-router-dom";
 
 import { Configure } from "./pages/Configure";
 import { Home } from "./pages/Home";
+import { Progress } from "./pages/Progress";
+import { Results } from "./pages/Results";
 
 function Placeholder({ name }: { name: string }) {
   return (
@@ -24,8 +26,8 @@ export function App() {
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/configure" element={<Configure />} />
-          <Route path="/progress/:jobId" element={<Placeholder name="Progress" />} />
-          <Route path="/results/:jobId" element={<Placeholder name="Results" />} />
+          <Route path="/progress/:jobId" element={<Progress />} />
+          <Route path="/results/:jobId" element={<Results />} />
         </Routes>
       </main>
     </div>

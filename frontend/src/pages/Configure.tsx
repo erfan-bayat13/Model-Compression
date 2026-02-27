@@ -84,7 +84,9 @@ export function Configure() {
         enable_mmlu: options.enableMmlu,
       }) as { job_id: string };
 
-      navigate(`/progress/${response.job_id}`);
+      navigate(`/progress/${response.job_id}`, {
+        state: { calcResult, modelId },
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to submit job.");
       setSubmitting(false);
