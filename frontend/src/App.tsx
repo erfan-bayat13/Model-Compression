@@ -1,35 +1,35 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import './App.css'
+import { Route, Routes } from "react-router-dom";
 
-function App() {
-  const [count, setCount] = useState(0)
+import { Configure } from "./pages/Configure";
+import { Home } from "./pages/Home";
 
+function Placeholder({ name }: { name: string }) {
   return (
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.tsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
-  )
+    <div className="min-h-screen flex items-center justify-center text-gray-400 text-sm">
+      {name} — coming soon
+    </div>
+  );
 }
 
-export default App
+export function App() {
+  return (
+    <div className="min-h-screen flex flex-col">
+      <header className="border-b border-gray-200 bg-white px-6 py-4">
+        <span className="text-sm font-semibold text-gray-900 tracking-tight">
+          Model Compression
+        </span>
+      </header>
+
+      <main className="flex-1">
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/configure" element={<Configure />} />
+          <Route path="/progress/:jobId" element={<Placeholder name="Progress" />} />
+          <Route path="/results/:jobId" element={<Placeholder name="Results" />} />
+        </Routes>
+      </main>
+    </div>
+  );
+}
+
+export default App;
