@@ -2,11 +2,10 @@ import logging
 import shutil
 from pathlib import Path
 
+from calculator import calculate_compression_targets
+from engine.detector import detect_and_validate
+from engine.nemo_engine import NemoCompressionEngine
 from nemo.collections import llm
-
-from backend.engine.detector import detect_and_validate, SUPPORTED_ARCHITECTURES
-from backend.engine.nemo_engine import NemoCompressionEngine
-from backend.calculator import calculate_compression_targets
 
 logger = logging.getLogger(__name__)
 
@@ -16,10 +15,10 @@ logger = logging.getLogger(__name__)
 # NeMo model class to pass into import_ckpt / export_ckpt.
 # ---------------------------------------------------------------------------
 ARCHITECTURE_TO_NEMO_MODEL = {
-    "LlamaForCausalLM":   llm.LlamaModel,
+    "LlamaForCausalLM": llm.LlamaModel,
     "MistralForCausalLM": llm.MistralModel,
     "MixtralForCausalLM": llm.MixtralModel,
-    "Qwen2ForCausalLM":   llm.Qwen2Model,
+    "Qwen2ForCausalLM": llm.Qwen2Model,
 }
 
 
@@ -62,16 +61,16 @@ class CompressionEngine:
             device_count:    Number of GPUs available.
             alignment:       Dimension alignment for calculator. Default 16.
         """
-        self.work_dir        = Path(work_dir)
+        self.work_dir = Path(work_dir)
         self.nemo_script_dir = nemo_script_dir
-        self.device_count    = device_count
-        self.alignment       = alignment
+        self.device_count = device_count
+        self.alignment = alignment
 
         # subdirectories — created lazily in run()
-        self.hf_input_dir   = self.work_dir / "hf_input"
+        self.hf_input_dir = self.work_dir / "hf_input"
         self.nemo_input_dir = self.work_dir / "nemo_input"
         self.nemo_output_dir = self.work_dir / "nemo_output"
-        self.hf_output_dir  = self.work_dir / "hf_output"
+        self.hf_output_dir = self.work_dir / "hf_output"
 
     # -----------------------------------------------------------------------
     # Private helpers
@@ -116,12 +115,11 @@ class CompressionEngine:
         model_class = ARCHITECTURE_TO_NEMO_MODEL[architecture]
 
         logger.info(
-            f"[hf→nemo] Converting {architecture} from {hf_model_path} "
-            f"to {output_path}"
+            f"[hf→nemo] Converting {architecture} from {hf_model_path} to {output_path}"
         )
 
         llm.import_ckpt(
-            model=model_class(),       # no hardcoded config — NeMo auto-detects
+            model=model_class(),  # no hardcoded config — NeMo auto-detects
             source=f"hf:///{hf_model_path}",
             output_path=output_path,
             overwrite=True,
@@ -287,11 +285,10 @@ class CompressionEngine:
         self._cleanup(self.nemo_output_dir, "nemo_output")
 
         logger.info(
-            f"[pipeline] Complete. "
-            f"Final HF checkpoint at: {self.hf_output_dir}"
+            f"[pipeline] Complete. Final HF checkpoint at: {self.hf_output_dir}"
         )
 
         return {
-            "hf_output_path":   str(self.hf_output_dir),
+            "hf_output_path": str(self.hf_output_dir),
             "compression_info": compression_info,
         }

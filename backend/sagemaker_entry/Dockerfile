@@ -39,7 +39,7 @@ RUN pip install --no-cache-dir \
 # SageMaker entrypoint
 # SageMaker Training Jobs call the container with:
 #   train  (default command for training jobs)
-# We map that to our entrypoint.py via the train script convention.
+# We map that to our compress.py via the train script convention.
 # SageMaker looks for an executable at /opt/ml/code/train — we create that.
 # -----------------------------------------------------------------------------
 ENV PYTHONPATH=/opt/compression:$PYTHONPATH
@@ -47,8 +47,8 @@ ENV PYTHONPATH=/opt/compression:$PYTHONPATH
 # Create the SageMaker-expected train script
 # SageMaker executes /opt/ml/code/train when the job starts
 RUN mkdir -p /opt/ml/code
-RUN echo '#!/bin/bash\npython /opt/compression/entrypoint.py "$@"' \
+RUN echo '#!/bin/bash\npython /opt/compression/compress.py "$@"' \
     > /opt/ml/code/train && chmod +x /opt/ml/code/train
 
 # Default entrypoint for local testing (not used by SageMaker)
-ENTRYPOINT ["python", "/opt/compression/entrypoint.py"]
+ENTRYPOINT ["python", "/opt/compression/compress.py"]
