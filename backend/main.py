@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from core.config import get_settings
+from routes.compression import router as compression_router
 from routes.models import router as models_router
 
 settings = get_settings()
@@ -17,6 +18,7 @@ app.add_middleware(
 )
 
 app.include_router(models_router)
+app.include_router(compression_router)
 
 
 @app.get("/health")

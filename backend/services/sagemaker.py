@@ -228,19 +228,6 @@ class SageMakerHandler:
         logger.info(f"[sagemaker] Job {job_name} completed successfully.")
         return status
 
-    def _get_output_path(self, job_name: str) -> str:
-        """
-        After a successful job, retrieve the S3 path of the output artifact.
-        SageMaker stores output at: {S3OutputPath}/{job_name}/output/output.tar.gz
-        But since we write directly to /opt/ml/output/data/ our output is at:
-        {s3_output_prefix}/{job_name}/output/
-        """
-        response = self.sm_client.describe_training_job(
-            TrainingJobName=job_name
-        )
-        # SageMaker appends job_name/output to whatever S3OutputPath we gave it
-        return response["OutputDataConfig"]["S3OutputPath"] + f"/{job_name}/output/"
-
     def _cleanup_s3_input(self, job_id: str) -> None:
         """
         Delete the S3 input prefix once the job is done.
@@ -272,8 +259,79 @@ class SageMakerHandler:
             logger.warning(f"[cleanup] Failed to clean up S3 input: {exc}")
 
     # -----------------------------------------------------------------------
-    # Public entry point
+    # Public API
     # -----------------------------------------------------------------------
+
+    def launch_job(
+        self,
+        model_id: str,
+        local_download_dir: str = "/tmp/hf_download",
+        width_pruning_pct: float = 0.0,
+        depth_pruning_pct: float = 0.0,
+        do_pruning: bool = True,
+        do_distillation: bool = False,
+        do_quantization: bool = False,
+        dataset_path: str | None = None,
+        enable_mmlu: bool = False,
+        distillation_steps: int = 1000,
+        quantization_algorithm: str = "fp8",
+        seq_length: int = 2048,
+    ) -> str:
+        """
+        Download weights, upload to S3, and fire off the SageMaker job.
+        Returns the job_id immediately — does NOT wait for completion.
+        """
+        job_id = self._generate_job_id()
+        logger.info(f"[handler] Launching compression job: {job_id}")
+
+        local_model_path = self._download_hf_model(
+            model_id=model_id,
+            local_dir=f"{local_download_dir}/{job_id}",
+        )
+
+        s3_input_prefix = self._s3_input_prefix(job_id)
+        self._upload_dir_to_s3(local_dir=local_model_path, s3_prefix=s3_input_prefix)
+
+        hyperparameters = {
+            "model_id":               model_id,
+            "width_pruning_pct":      width_pruning_pct,
+            "depth_pruning_pct":      depth_pruning_pct,
+            "do_pruning":             do_pruning,
+            "do_distillation":        do_distillation,
+            "do_quantization":        do_quantization,
+            "enable_mmlu":            enable_mmlu,
+            "distillation_steps":     distillation_steps,
+            "quantization_algorithm": quantization_algorithm,
+            "seq_length":             seq_length,
+        }
+        if dataset_path:
+            hyperparameters["dataset_path"] = dataset_path
+
+        self._launch_training_job(
+            job_id=job_id,
+            s3_input_uri=self._s3_uri(s3_input_prefix),
+            s3_output_uri=self._s3_uri(self._s3_output_prefix(job_id)),
+            hyperparameters=hyperparameters,
+        )
+
+        return job_id
+
+    def get_job_status(self, job_id: str) -> dict:
+        """
+        Returns the current SageMaker job status without blocking.
+        Dict keys: status, failure_reason, created_at.
+        """
+        response = self.sm_client.describe_training_job(TrainingJobName=job_id)
+        return {
+            "status":         response["TrainingJobStatus"],
+            "failure_reason": response.get("FailureReason"),
+            "created_at":     response["CreationTime"],
+        }
+
+    def get_output_path(self, job_id: str) -> str:
+        """S3 URI of the compressed model output for a completed job."""
+        response = self.sm_client.describe_training_job(TrainingJobName=job_id)
+        return response["OutputDataConfig"]["S3OutputPath"] + f"/{job_id}/output/"
 
     def run_compression_job(
         self,
@@ -285,101 +343,35 @@ class SageMakerHandler:
         do_distillation: bool = False,
         do_quantization: bool = False,
         dataset_path: str | None = None,
+        enable_mmlu: bool = False,
         distillation_steps: int = 1000,
         quantization_algorithm: str = "fp8",
         seq_length: int = 2048,
     ) -> dict:
         """
-        Full orchestration from model ID to compressed HF checkpoint in S3.
-
-        Flow:
-          1. Generate unique job ID
-          2. Download HF weights locally
-          3. Upload to S3 input prefix
-          4. Launch SageMaker Training Job
-          5. Poll until complete
-          6. Clean up S3 input
-          7. Return output S3 path + job metadata
-
-        Args:
-            model_id:              HuggingFace model ID e.g. "meta-llama/Llama-3.1-8B"
-            local_download_dir:    Temp dir for downloading HF weights before S3 upload.
-            width_pruning_pct:     Fraction of layer params to remove via width pruning.
-            depth_pruning_pct:     Fraction of layers to remove via depth pruning.
-            do_pruning:            Whether to run pruning.
-            do_distillation:       Whether to run distillation after pruning.
-            do_quantization:       Whether to run quantization last.
-            dataset_path:          S3 path to dataset. Uses default wikitext if None.
-            distillation_steps:    Training steps for distillation.
-            quantization_algorithm: Quantization algorithm (fp8, int8_sq, etc.)
-            seq_length:            Sequence length for pruning/distillation.
-
-        Returns:
-            {
-                "job_id":        str,   # SageMaker job name
-                "s3_output_uri": str,   # S3 path to final compressed HF model
-                "status":        str,   # "Completed"
-            }
+        Blocking convenience wrapper — launch, poll, clean up, return result.
+        Useful for CLI use and testing. The API routes use launch_job() instead.
         """
-        # Step 1: unique job ID — used for both SageMaker job name and S3 prefix
-        job_id = self._generate_job_id()
-        logger.info(f"[handler] Starting compression job: {job_id}")
-
-        # Step 2: download HF weights to local disk
-        local_model_path = self._download_hf_model(
+        job_id = self.launch_job(
             model_id=model_id,
-            local_dir=f"{local_download_dir}/{job_id}",
+            local_download_dir=local_download_dir,
+            width_pruning_pct=width_pruning_pct,
+            depth_pruning_pct=depth_pruning_pct,
+            do_pruning=do_pruning,
+            do_distillation=do_distillation,
+            do_quantization=do_quantization,
+            dataset_path=dataset_path,
+            enable_mmlu=enable_mmlu,
+            distillation_steps=distillation_steps,
+            quantization_algorithm=quantization_algorithm,
+            seq_length=seq_length,
         )
 
-        # Step 3: upload to S3 so SageMaker can pull them into the container
-        s3_input_prefix = self._s3_input_prefix(job_id)
-        self._upload_dir_to_s3(
-            local_dir=local_model_path,
-            s3_prefix=s3_input_prefix,
-        )
-
-        # Step 4: launch the SageMaker Training Job
-        # Hyperparameters are passed to the container entrypoint as CLI args
-        # compression_engine.py reads these to configure its run() call
-        hyperparameters = {
-            "model_id":               model_id,
-            "width_pruning_pct":      width_pruning_pct,
-            "depth_pruning_pct":      depth_pruning_pct,
-            "do_pruning":             do_pruning,
-            "do_distillation":        do_distillation,
-            "do_quantization":        do_quantization,
-            "distillation_steps":     distillation_steps,
-            "quantization_algorithm": quantization_algorithm,
-            "seq_length":             seq_length,
-        }
-
-        if dataset_path:
-            hyperparameters["dataset_path"] = dataset_path
-
-        s3_input_uri  = self._s3_uri(s3_input_prefix)
-        s3_output_uri = self._s3_uri(self._s3_output_prefix(job_id))
-
-        self._launch_training_job(
-            job_id=job_id,
-            s3_input_uri=s3_input_uri,
-            s3_output_uri=s3_output_uri,
-            hyperparameters=hyperparameters,
-        )
-
-        # Step 5: poll until done
         status = self._poll_job(job_name=job_id)
-
-        # Step 6: clean up S3 input — compressed output is all we need now
         self._cleanup_s3_input(job_id)
+        output_uri = self.get_output_path(job_id)
 
-        # Step 7: return output location
-        output_uri = self._get_output_path(job_name=job_id)
-
-        logger.info(
-            f"[handler] Job {job_id} complete. "
-            f"Output at: {output_uri}"
-        )
-
+        logger.info(f"[handler] Job {job_id} complete. Output at: {output_uri}")
         return {
             "job_id":        job_id,
             "s3_output_uri": output_uri,
