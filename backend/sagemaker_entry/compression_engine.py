@@ -5,6 +5,7 @@ from pathlib import Path
 from calculator import calculate_compression_targets
 from engine.detector import detect_and_validate
 from engine.nemo_engine import NemoCompressionEngine
+from huggingface_hub import snapshot_download
 from nemo.collections import llm
 
 logger = logging.getLogger(__name__)
@@ -67,10 +68,10 @@ class CompressionEngine:
         self.alignment = alignment
 
         # subdirectories — created lazily in run()
-        self.hf_input_dir = self.work_dir / "hf_input"
-        self.nemo_input_dir = self.work_dir / "nemo_input"
-        self.nemo_output_dir = self.work_dir / "nemo_output"
-        self.hf_output_dir = self.work_dir / "hf_output"
+        self.hf_output_dir   = self.work_dir / "hf_output"  # keep here — SageMaker uploads this
+        self.hf_input_dir    = Path("/tmp/hf_input")         # move to /tmp/
+        self.nemo_input_dir  = Path("/tmp/nemo_input")       # move to /tmp/
+        self.nemo_output_dir = Path("/tmp/nemo_output")      # move to /tmp/
 
     # -----------------------------------------------------------------------
     # Private helpers
@@ -196,6 +197,16 @@ class CompressionEngine:
         """
         self._setup_dirs()
 
+        # ------------------------------------------------------------------
+        # Step 0: download model from HuggingFace Hub to local storage
+        # ------------------------------------------------------------------
+        logger.info(f"[pipeline] Downloading {model_id} from HuggingFace Hub")
+        snapshot_download(
+            repo_id=model_id,
+            local_dir=str(self.hf_input_dir),
+            ignore_patterns=["*.md", "*.txt"],
+        )
+        logger.info("[pipeline] Download complete")
         # ------------------------------------------------------------------
         # Step 1: Detect architecture and validate
         # ------------------------------------------------------------------

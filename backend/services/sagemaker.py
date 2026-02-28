@@ -4,7 +4,6 @@ import uuid
 from pathlib import Path
 
 import boto3
-from huggingface_hub import snapshot_download
 
 logger = logging.getLogger(__name__)
 
@@ -82,24 +81,6 @@ class SageMakerHandler:
     def _s3_uri(self, prefix: str) -> str:
         return f"s3://{self.bucket}/{prefix}"
 
-    def _download_hf_model(self, model_id: str, local_dir: str) -> str:
-        """
-        Download HF model weights to a local directory using snapshot_download.
-        This pulls the full model repo (weights, tokenizer, config) — everything
-        needed for llm.import_ckpt inside the container.
-
-        Returns the local path where weights were saved.
-        """
-        logger.info(f"[s3-upload] Downloading {model_id} from HuggingFace Hub")
-
-        local_path = snapshot_download(
-            repo_id=model_id,
-            local_dir=local_dir,
-            ignore_patterns=["*.md", "*.txt"],  # skip docs, only weights + config
-        )
-
-        logger.info(f"[s3-upload] Downloaded to {local_path}")
-        return local_path
 
     def _upload_dir_to_s3(self, local_dir: str, s3_prefix: str) -> None:
         """
@@ -132,7 +113,6 @@ class SageMakerHandler:
     def _launch_training_job(
         self,
         job_id: str,
-        s3_input_uri: str,
         s3_output_uri: str,
         hyperparameters: dict,
     ) -> str:
@@ -158,18 +138,6 @@ class SageMakerHandler:
                 "TrainingImage":     self.image_uri,
                 "TrainingInputMode": "File",  # SageMaker copies S3 → local before start
             },
-            InputDataConfig=[
-                {
-                    "ChannelName":     "model",
-                    "DataSource": {
-                        "S3DataSource": {
-                            "S3DataType":             "S3Prefix",
-                            "S3Uri":                  s3_input_uri,
-                            "S3DataDistributionType": "FullyReplicated",
-                        }
-                    },
-                }
-            ],
             OutputDataConfig={
                 "S3OutputPath": s3_output_uri,
             },
@@ -265,7 +233,6 @@ class SageMakerHandler:
     def launch_job(
         self,
         model_id: str,
-        local_download_dir: str = "/tmp/hf_download",
         width_pruning_pct: float = 0.0,
         depth_pruning_pct: float = 0.0,
         do_pruning: bool = True,
@@ -284,14 +251,7 @@ class SageMakerHandler:
         job_id = self._generate_job_id()
         logger.info(f"[handler] Launching compression job: {job_id}")
 
-        local_model_path = self._download_hf_model(
-            model_id=model_id,
-            local_dir=f"{local_download_dir}/{job_id}",
-        )
-
-        s3_input_prefix = self._s3_input_prefix(job_id)
-        self._upload_dir_to_s3(local_dir=local_model_path, s3_prefix=s3_input_prefix)
-
+        
         hyperparameters = {
             "model_id":               model_id,
             "width_pruning_pct":      width_pruning_pct,
@@ -309,7 +269,6 @@ class SageMakerHandler:
 
         self._launch_training_job(
             job_id=job_id,
-            s3_input_uri=self._s3_uri(s3_input_prefix),
             s3_output_uri=self._s3_uri(self._s3_output_prefix(job_id)),
             hyperparameters=hyperparameters,
         )
@@ -354,7 +313,7 @@ class SageMakerHandler:
         """
         job_id = self.launch_job(
             model_id=model_id,
-            local_download_dir=local_download_dir,
+            # local_download_dir=local_download_dir,
             width_pruning_pct=width_pruning_pct,
             depth_pruning_pct=depth_pruning_pct,
             do_pruning=do_pruning,

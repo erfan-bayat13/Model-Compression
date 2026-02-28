@@ -50,11 +50,9 @@ def main():
     # --- SageMaker standard paths ---
     # SageMaker copies S3 input to SM_CHANNEL_MODEL before the job starts
     # We write output to SM_OUTPUT_DATA_DIR and SageMaker syncs it to S3 after
-    input_dir      = os.environ.get("SM_CHANNEL_MODEL",    "/opt/ml/input/data/model")
     output_dir     = os.environ.get("SM_OUTPUT_DATA_DIR",  "/opt/ml/output/data")
     nemo_script_dir = "/opt/NeMo/scripts/llm"
 
-    logger.info(f"Input dir:  {input_dir}")
     logger.info(f"Output dir: {output_dir}")
 
     # --- Read hyperparameters (set by sagemaker_handler.py) ---
@@ -87,7 +85,6 @@ def main():
 
     # Override hf_input_dir to point at SageMaker's input channel
     # (SageMaker already downloaded the HF model here from S3)
-    engine.hf_input_dir = input_dir
 
     result = engine.run(
         model_id=model_id,
