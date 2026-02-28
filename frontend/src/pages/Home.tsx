@@ -18,7 +18,7 @@ export function Home() {
     setResult(null);
 
     try {
-      const data = await detectModel(modelId) as DetectResponse;
+      const data = (await detectModel(modelId)) as DetectResponse;
       setResult(data);
       setDetectedModelId(modelId);
     } catch (err) {
@@ -29,35 +29,48 @@ export function Home() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center px-4">
+    <div className="min-h-[calc(100vh-53px)] flex flex-col items-center justify-center px-4 py-16">
       <div className="w-full max-w-lg space-y-8">
         <div>
-          <h1 className="text-2xl font-semibold text-gray-900">Model Compression</h1>
-          <p className="mt-1 text-sm text-gray-500">
-            Enter a HuggingFace model ID to get started.
+          <h1 className="text-3xl font-semibold text-[var(--text-primary)] tracking-tight">
+            Compress a model
+          </h1>
+          <p className="mt-2 text-sm text-[var(--text-secondary)]">
+            Enter a HuggingFace model ID to detect architecture and configure
+            compression.
           </p>
         </div>
 
         <ModelInput onDetect={handleDetect} loading={loading} error={error} />
 
         {result && (
-          <div className="bg-white border border-gray-200 rounded-lg p-5 space-y-4">
+          <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg p-5 space-y-4 fade-in">
             <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-gray-700">Architecture</span>
-              <span className="text-sm text-gray-900 font-mono">{result.model_info.architecture}</span>
+              <span className="text-xs font-medium text-[var(--text-muted)] uppercase tracking-widest">
+                Architecture
+              </span>
+              <span className="text-sm text-[var(--text-primary)] font-mono">
+                {result.model_info.architecture}
+              </span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-gray-700">Parameters</span>
-              <span className="text-sm text-gray-900">{result.model_info.total_params_B}B</span>
+              <span className="text-xs font-medium text-[var(--text-muted)] uppercase tracking-widest">
+                Parameters
+              </span>
+              <span className="text-sm text-[var(--text-primary)] font-mono">
+                {result.model_info.total_params_B}B
+              </span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-gray-700">Status</span>
+              <span className="text-xs font-medium text-[var(--text-muted)] uppercase tracking-widest">
+                Status
+              </span>
               {result.model_info.supported ? (
-                <span className="text-xs font-medium text-green-700 bg-green-100 px-2 py-0.5 rounded-full">
+                <span className="text-xs font-medium text-[var(--accent)] border border-[var(--accent-muted)] bg-[var(--accent-muted-bg)] px-2 py-0.5 rounded-full">
                   Supported
                 </span>
               ) : (
-                <span className="text-xs font-medium text-red-700 bg-red-100 px-2 py-0.5 rounded-full">
+                <span className="text-xs font-medium text-[var(--danger)] border border-red-800 bg-red-950/50 px-2 py-0.5 rounded-full">
                   Unsupported
                 </span>
               )}
@@ -65,10 +78,14 @@ export function Home() {
 
             {result.model_info.supported && (
               <button
-                onClick={() => navigate("/configure", { state: { modelId: detectedModelId, detectResult: result } })}
-                className="w-full mt-2 px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-700 transition-colors"
+                onClick={() =>
+                  navigate("/configure", {
+                    state: { modelId: detectedModelId, detectResult: result },
+                  })
+                }
+                className="w-full mt-2 px-4 py-2.5 bg-[var(--accent)] text-black text-sm font-medium rounded-lg hover:brightness-110 transition-all"
               >
-                Continue
+                Continue →
               </button>
             )}
           </div>

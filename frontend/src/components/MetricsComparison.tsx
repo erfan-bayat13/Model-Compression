@@ -21,10 +21,22 @@ function Row({
   highlight?: boolean;
 }) {
   return (
-    <tr className={highlight ? "bg-blue-50" : "border-t border-gray-100"}>
-      <td className="py-3 pl-4 pr-6 text-sm text-gray-500 whitespace-nowrap">{label}</td>
-      <td className="py-3 px-4 text-sm text-gray-900 text-right">{original}</td>
-      <td className="py-3 pl-4 pr-4 text-sm text-right font-medium text-blue-700">{compressed}</td>
+    <tr
+      className={
+        highlight
+          ? "bg-[var(--accent-muted-bg)] border-t border-[var(--border)]"
+          : "border-t border-[var(--border)]"
+      }
+    >
+      <td className="py-3 pl-4 pr-6 text-sm text-[var(--text-secondary)] whitespace-nowrap">
+        {label}
+      </td>
+      <td className="py-3 px-4 text-sm text-[var(--text-primary)] font-mono text-right">
+        {original}
+      </td>
+      <td className="py-3 pl-4 pr-4 text-sm text-right font-medium font-mono text-[var(--accent)]">
+        {compressed}
+      </td>
     </tr>
   );
 }
@@ -37,13 +49,19 @@ export function MetricsComparison({ result }: Props) {
   const speedup = `~${compression_ratio}x`;
 
   return (
-    <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+    <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg overflow-hidden">
       <table className="w-full">
         <thead>
-          <tr className="bg-gray-50">
-            <th className="py-2.5 pl-4 pr-6 text-xs font-medium text-gray-400 text-left">Metric</th>
-            <th className="py-2.5 px-4 text-xs font-medium text-gray-400 text-right">Original</th>
-            <th className="py-2.5 pl-4 pr-4 text-xs font-medium text-gray-400 text-right">Compressed</th>
+          <tr className="bg-[var(--bg-tertiary)]">
+            <th className="py-2.5 pl-4 pr-6 text-xs font-medium text-[var(--text-muted)] text-left">
+              Metric
+            </th>
+            <th className="py-2.5 px-4 text-xs font-medium text-[var(--text-muted)] text-right">
+              Original
+            </th>
+            <th className="py-2.5 pl-4 pr-4 text-xs font-medium text-[var(--text-muted)] text-right">
+              Compressed
+            </th>
           </tr>
         </thead>
         <tbody>

@@ -24,7 +24,7 @@ export function Configure() {
   const [widthPct, setWidthPct] = useState(0);
   const [depthPct, setDepthPct] = useState(0);
   const [calcResult, setCalcResult] = useState<CalculatorResult | null>(
-    detectResult?.calculator_result ?? null
+    detectResult?.calculator_result ?? null,
   );
   const [options, setOptions] = useState<Options>(DEFAULT_OPTIONS);
   const [submitting, setSubmitting] = useState(false);
@@ -52,11 +52,11 @@ export function Configure() {
 
     const timer = setTimeout(async () => {
       try {
-        const result = await calculateTargets(
+        const result = (await calculateTargets(
           hfConfig,
           widthPct / 100,
           depthPct / 100,
-        ) as CalculatorResult;
+        )) as CalculatorResult;
         setCalcResult(result);
       } catch {
         // non-critical — keep showing the last valid result
@@ -73,7 +73,7 @@ export function Configure() {
     setError(null);
 
     try {
-      const response = await submitCompression({
+      const response = (await submitCompression({
         model_id: modelId ?? detectResult.model_info.architecture,
         width_pruning_pct: widthPct / 100,
         depth_pruning_pct: depthPct / 100,
@@ -82,7 +82,7 @@ export function Configure() {
         do_quantization: options.doQuantization,
         dataset_path: options.datasetPath || null,
         enable_mmlu: options.enableMmlu,
-      }) as { job_id: string };
+      })) as { job_id: string };
 
       navigate(`/progress/${response.job_id}`, {
         state: { calcResult, modelId },
@@ -98,18 +98,28 @@ export function Configure() {
   return (
     <div className="max-w-2xl mx-auto px-4 py-10 space-y-8">
       <div>
-        <h1 className="text-xl font-semibold text-gray-900">Configure Compression</h1>
-        <p className="mt-1 text-sm text-gray-500 font-mono">{detectResult.model_info.architecture}</p>
+        <h1 className="text-xl font-semibold text-[var(--text-primary)]">
+          Configure compression
+        </h1>
+        <p className="mt-1 text-sm text-[var(--text-muted)] font-mono">
+          {detectResult.model_info.architecture}
+        </p>
       </div>
 
-      <section className="space-y-4">
-        <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Pruning</h2>
+      <section className="space-y-5">
+        <h2 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-widest">
+          Pruning
+        </h2>
 
-        <div className="space-y-4">
+        <div className="space-y-5">
           <div>
-            <div className="flex justify-between mb-1">
-              <label className="text-sm text-gray-700">Width pruning</label>
-              <span className="text-sm font-medium text-gray-900">{widthPct}%</span>
+            <div className="flex justify-between mb-2">
+              <label className="text-sm text-[var(--text-secondary)]">
+                Width pruning
+              </label>
+              <span className="text-sm font-medium font-mono text-[var(--text-primary)]">
+                {widthPct}%
+              </span>
             </div>
             <input
               type="range"
@@ -117,15 +127,20 @@ export function Configure() {
               max={50}
               value={widthPct}
               onChange={(e) => setWidthPct(Number(e.target.value))}
-              className="w-full accent-blue-600"
             />
-            <p className="text-xs text-gray-400 mt-1">Reduces hidden and FFN dimensions.</p>
+            <p className="text-xs text-[var(--text-muted)] mt-1.5">
+              Reduces hidden and FFN dimensions.
+            </p>
           </div>
 
           <div>
-            <div className="flex justify-between mb-1">
-              <label className="text-sm text-gray-700">Depth pruning</label>
-              <span className="text-sm font-medium text-gray-900">{depthPct}%</span>
+            <div className="flex justify-between mb-2">
+              <label className="text-sm text-[var(--text-secondary)]">
+                Depth pruning
+              </label>
+              <span className="text-sm font-medium font-mono text-[var(--text-primary)]">
+                {depthPct}%
+              </span>
             </div>
             <input
               type="range"
@@ -133,33 +148,38 @@ export function Configure() {
               max={50}
               value={depthPct}
               onChange={(e) => setDepthPct(Number(e.target.value))}
-              className="w-full accent-blue-600"
             />
-            <p className="text-xs text-gray-400 mt-1">Removes transformer layers.</p>
+            <p className="text-xs text-[var(--text-muted)] mt-1.5">
+              Removes transformer layers.
+            </p>
           </div>
         </div>
       </section>
 
       {calcResult && (
         <section className="space-y-3">
-          <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Estimated Output</h2>
+          <h2 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-widest">
+            Estimated output
+          </h2>
           <CalculatorBreakdown result={calcResult} />
         </section>
       )}
 
       <section className="space-y-3">
-        <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Options</h2>
+        <h2 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-widest">
+          Options
+        </h2>
         <CompressionOptions options={options} onChange={setOptions} />
       </section>
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm text-[var(--danger)]">{error}</p>}
 
       <button
         onClick={handleSubmit}
         disabled={submitting}
-        className="w-full px-4 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        className="w-full px-4 py-2.5 bg-[var(--accent)] text-black text-sm font-medium rounded-lg hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
       >
-        {submitting ? "Submitting…" : "Compress Model"}
+        {submitting ? "Submitting…" : "Compress model"}
       </button>
     </div>
   );

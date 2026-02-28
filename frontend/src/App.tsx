@@ -5,21 +5,16 @@ import { Home } from "./pages/Home";
 import { Progress } from "./pages/Progress";
 import { Results } from "./pages/Results";
 
-function Placeholder({ name }: { name: string }) {
-  return (
-    <div className="min-h-screen flex items-center justify-center text-gray-400 text-sm">
-      {name} — coming soon
-    </div>
-  );
-}
-
 export function App() {
   return (
     <div className="min-h-screen flex flex-col">
-      <header className="border-b border-gray-200 bg-white px-6 py-4">
-        <span className="text-sm font-semibold text-gray-900 tracking-tight">
-          Model Compression
-        </span>
+      <header className="border-b border-[var(--border)] px-6 py-3.5 flex-shrink-0">
+        <div className="flex items-center gap-2">
+          <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent)]" />
+          <span className="text-sm font-medium font-mono text-[var(--text-primary)] tracking-tight">
+            model-compression
+          </span>
+        </div>
       </header>
 
       <main className="flex-1">

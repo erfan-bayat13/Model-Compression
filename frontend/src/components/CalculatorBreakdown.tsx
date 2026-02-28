@@ -4,12 +4,36 @@ interface Props {
   result: CalculatorResult;
 }
 
-function Row({ label, original, after }: { label: string; original: string; after: string }) {
+function Row({
+  label,
+  original,
+  after,
+  highlight,
+}: {
+  label: string;
+  original: string;
+  after: string;
+  highlight?: boolean;
+}) {
   return (
-    <tr className="border-t border-gray-100">
-      <td className="py-2.5 pr-4 text-sm text-gray-500 whitespace-nowrap">{label}</td>
-      <td className="py-2.5 px-4 text-sm text-gray-900 text-right">{original}</td>
-      <td className="py-2.5 pl-4 text-sm text-right font-medium text-blue-700">{after}</td>
+    <tr
+      className={
+        highlight
+          ? "bg-[var(--accent-muted-bg)] border-t border-[var(--border)]"
+          : "border-t border-[var(--border)]"
+      }
+    >
+      <td className="py-2.5 pl-4 pr-4 text-sm text-[var(--text-secondary)] whitespace-nowrap">
+        {label}
+      </td>
+      <td className="py-2.5 px-4 text-sm text-[var(--text-primary)] font-mono text-right">
+        {original}
+      </td>
+      <td
+        className={`py-2.5 pl-4 pr-4 text-sm text-right font-medium font-mono ${highlight ? "text-[var(--accent)]" : "text-[var(--accent)]"}`}
+      >
+        {after}
+      </td>
     </tr>
   );
 }
@@ -18,46 +42,52 @@ export function CalculatorBreakdown({ result }: Props) {
   const { original, targets, expected_params_B, compression_ratio } = result;
 
   return (
-    <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+    <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg overflow-hidden">
       <table className="w-full">
         <thead>
-          <tr className="bg-gray-50">
-            <th className="py-2.5 pr-4 text-xs font-medium text-gray-400 text-left pl-4">Metric</th>
-            <th className="py-2.5 px-4 text-xs font-medium text-gray-400 text-right">Original</th>
-            <th className="py-2.5 pl-4 pr-4 text-xs font-medium text-gray-400 text-right">After Compression</th>
+          <tr className="bg-[var(--bg-tertiary)]">
+            <th className="py-2.5 pl-4 pr-4 text-xs font-medium text-[var(--text-muted)] text-left">
+              Metric
+            </th>
+            <th className="py-2.5 px-4 text-xs font-medium text-[var(--text-muted)] text-right">
+              Original
+            </th>
+            <th className="py-2.5 pl-4 pr-4 text-xs font-medium text-[var(--text-muted)] text-right">
+              After compression
+            </th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-gray-50 px-4">
-          <tr className="border-t border-gray-100">
-            <td className="py-2.5 pr-4 pl-4 text-sm text-gray-500">Parameters</td>
-            <td className="py-2.5 px-4 text-sm text-gray-900 text-right">{original.total_params_B}B</td>
-            <td className="py-2.5 pl-4 pr-4 text-sm text-right font-medium text-blue-700">{expected_params_B}B</td>
-          </tr>
-          <tr className="border-t border-gray-100">
-            <td className="py-2.5 pr-4 pl-4 text-sm text-gray-500">Layers</td>
-            <td className="py-2.5 px-4 text-sm text-gray-900 text-right">{original.num_layers}</td>
-            <td className="py-2.5 pl-4 pr-4 text-sm text-right font-medium text-blue-700">
-              {targets.target_num_layers}
-              {targets.layers_removed > 0 && (
-                <span className="ml-1 text-xs text-gray-400">(-{targets.layers_removed})</span>
-              )}
-            </td>
-          </tr>
-          <tr className="border-t border-gray-100">
-            <td className="py-2.5 pr-4 pl-4 text-sm text-gray-500">Hidden size</td>
-            <td className="py-2.5 px-4 text-sm text-gray-900 text-right">{original.hidden_size}</td>
-            <td className="py-2.5 pl-4 pr-4 text-sm text-right font-medium text-blue-700">{targets.target_hidden_size}</td>
-          </tr>
-          <tr className="border-t border-gray-100">
-            <td className="py-2.5 pr-4 pl-4 text-sm text-gray-500">FFN size</td>
-            <td className="py-2.5 px-4 text-sm text-gray-900 text-right">{original.ffn_hidden_size}</td>
-            <td className="py-2.5 pl-4 pr-4 text-sm text-right font-medium text-blue-700">{targets.target_ffn_hidden_size}</td>
-          </tr>
-          <tr className="border-t border-gray-100 bg-gray-50">
-            <td className="py-2.5 pr-4 pl-4 text-sm font-medium text-gray-700">Compression ratio</td>
-            <td className="py-2.5 px-4 text-sm text-gray-400 text-right">—</td>
-            <td className="py-2.5 pl-4 pr-4 text-sm text-right font-semibold text-blue-700">{compression_ratio}x</td>
-          </tr>
+        <tbody>
+          <Row
+            label="Parameters"
+            original={`${original.total_params_B}B`}
+            after={`${expected_params_B}B`}
+          />
+          <Row
+            label="Layers"
+            original={String(original.num_layers)}
+            after={
+              targets.layers_removed > 0
+                ? `${targets.target_num_layers} (−${targets.layers_removed})`
+                : String(targets.target_num_layers)
+            }
+          />
+          <Row
+            label="Hidden size"
+            original={String(original.hidden_size)}
+            after={String(targets.target_hidden_size)}
+          />
+          <Row
+            label="FFN size"
+            original={String(original.ffn_hidden_size)}
+            after={String(targets.target_ffn_hidden_size)}
+          />
+          <Row
+            label="Compression ratio"
+            original="—"
+            after={`${compression_ratio}x`}
+            highlight
+          />
         </tbody>
       </table>
     </div>
