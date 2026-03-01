@@ -11,8 +11,8 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 DEFAULT_DATASETS = {
     ## TODO: replace these with actual S3 paths to tokenized datasets.
-    "wikitext": "s3://your-bucket/datasets/wikitext/wikitext_text_document",
-    "pubmed":   "s3://your-bucket/datasets/pubmed/pubmed_text_document",
+    "wikitext": "s3://model-compression-mvp/datasets/wikitext/wikitext_text_document",
+    "pubmed":   "s3://model-compression-mvp/datasets/pubmed/pubmed_text_document",
 }
 
 DEFAULT_DATASET = "wikitext"  # used when user provides nothing
