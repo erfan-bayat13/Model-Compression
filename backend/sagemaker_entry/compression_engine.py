@@ -100,6 +100,79 @@ class CompressionEngine:
         except Exception as exc:
             logger.warning(f"[cleanup] Failed to delete {label} at {path}: {exc}")
 
+    def _build_nemo_model(self, architecture: str, hf_model_path: str):
+        """
+        Build a NeMo model instance with config read directly from the
+        HuggingFace config.json. This avoids ZeroDivisionError from empty
+        default configs and works for any model size.
+        """
+        import json
+        
+        config_path = Path(hf_model_path) / "config.json"
+        with open(config_path) as f:
+            hf_config = json.load(f)
+
+        hidden_size        = hf_config["hidden_size"]
+        num_layers         = hf_config["num_hidden_layers"]
+        num_heads          = hf_config["num_attention_heads"]
+        num_kv_heads       = hf_config.get("num_key_value_heads", num_heads)
+        ffn_hidden_size    = hf_config["intermediate_size"]
+        vocab_size         = hf_config["vocab_size"]
+        max_position       = hf_config.get("max_position_embeddings", 4096)
+
+        if architecture == "LlamaForCausalLM":
+            from nemo.collections.llm import LlamaConfig
+            config = LlamaConfig(
+                hidden_size=hidden_size,
+                num_layers=num_layers,
+                num_attention_heads=num_heads,
+                num_query_groups=num_kv_heads,
+                ffn_hidden_size=ffn_hidden_size,
+                vocab_size=vocab_size,
+            )
+            return llm.LlamaModel(config)
+
+        elif architecture == "MistralForCausalLM":
+            from nemo.collections.llm import MistralConfig
+            config = MistralConfig(
+                hidden_size=hidden_size,
+                num_layers=num_layers,
+                num_attention_heads=num_heads,
+                num_query_groups=num_kv_heads,
+                ffn_hidden_size=ffn_hidden_size,
+                vocab_size=vocab_size,
+            )
+            return llm.MistralModel(config)
+
+        elif architecture == "Qwen2ForCausalLM":
+            from nemo.collections.llm import Qwen2Config
+            config = Qwen2Config(
+                hidden_size=hidden_size,
+                num_layers=num_layers,
+                num_attention_heads=num_heads,
+                num_query_groups=num_kv_heads,
+                ffn_hidden_size=ffn_hidden_size,
+                vocab_size=vocab_size,
+            )
+            return llm.Qwen2Model(config)
+
+        elif architecture == "MixtralForCausalLM":
+            from nemo.collections.llm import MixtralConfig
+            config = MixtralConfig(
+                hidden_size=hidden_size,
+                num_layers=num_layers,
+                num_attention_heads=num_heads,
+                num_query_groups=num_kv_heads,
+                ffn_hidden_size=ffn_hidden_size,
+                vocab_size=vocab_size,
+                num_moe_experts=num_experts,
+                moe_router_topk=top_k,
+            )
+            return llm.MixtralModel(config)
+
+        else:
+            raise ValueError(f"Unsupported architecture: {architecture}")
+
     def _hf_to_nemo(
         self,
         hf_model_path: str,
@@ -119,9 +192,11 @@ class CompressionEngine:
             f"[hf→nemo] Converting {architecture} from {hf_model_path} to {output_path}"
         )
 
+        nemo_model = self._build_nemo_model(architecture, hf_model_path)
+
         llm.import_ckpt(
-            model=model_class(),  # no hardcoded config — NeMo auto-detects
-            source=f"hf:///{hf_model_path}",
+            model=nemo_model,
+            source=f"hf://{hf_model_path}",
             output_path=output_path,
             overwrite=True,
         )
