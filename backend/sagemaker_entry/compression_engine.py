@@ -1,7 +1,10 @@
+import json
 import logging
 import shutil
+from contextlib import contextmanager
 from pathlib import Path
 
+import torch
 from calculator import calculate_compression_targets
 from engine.detector import detect_and_validate
 from engine.nemo_engine import NemoCompressionEngine
@@ -40,10 +43,11 @@ class CompressionEngine:
 
     Directory layout under work_dir for a given job:
         work_dir/
+            hf_output/      ← final HF checkpoint (returned to caller, uploaded by SageMaker)
+        /tmp/
             hf_input/       ← downloaded HF weights (deleted after → .nemo)
             nemo_input/     ← converted .nemo (deleted after compression)
             nemo_output/    ← compressed .nemo steps (deleted after → HF)
-            hf_output/      ← final HF checkpoint (returned to caller)
     """
 
     def __init__(
@@ -55,9 +59,9 @@ class CompressionEngine:
     ):
         """
         Args:
-            work_dir:        Root directory for all intermediate and final files.
-                             In production this is the SageMaker job's local
-                             scratch space, which maps to an S3 prefix.
+            work_dir:        Root directory for final output files.
+                             In production this is the SageMaker job's output
+                             directory, which maps to an S3 prefix.
             nemo_script_dir: Path to NeMo's scripts/llm/ inside the container.
             device_count:    Number of GPUs available.
             alignment:       Dimension alignment for calculator. Default 16.
@@ -67,11 +71,18 @@ class CompressionEngine:
         self.device_count = device_count
         self.alignment = alignment
 
-        # subdirectories — created lazily in run()
-        self.hf_output_dir   = self.work_dir / "hf_output"  # keep here — SageMaker uploads this
-        self.hf_input_dir    = Path("/tmp/hf_input")         # move to /tmp/
-        self.nemo_input_dir  = Path("/tmp/nemo_input")       # move to /tmp/
-        self.nemo_output_dir = Path("/tmp/nemo_output")      # move to /tmp/
+        # hf_output stays under work_dir — SageMaker uploads this to S3
+        self.hf_output_dir = self.work_dir / "hf_output"
+
+        # Intermediate dirs go to /tmp/ to avoid filling the SageMaker output volume
+        self.hf_input_dir    = Path("/tmp/hf_input")
+        self.nemo_input_dir  = Path("/tmp/nemo_input")
+        self.nemo_output_dir = Path("/tmp/nemo_output")
+
+        # Cached HF config dict — populated during _hf_to_nemo and reused by
+        # _nemo_to_hf so we don't depend on hf_input_dir still existing at
+        # export time (it's deleted by the cascade cleanup in between).
+        self._cached_hf_config: dict | None = None
 
     # -----------------------------------------------------------------------
     # Private helpers
@@ -100,25 +111,66 @@ class CompressionEngine:
         except Exception as exc:
             logger.warning(f"[cleanup] Failed to delete {label} at {path}: {exc}")
 
-    def _build_nemo_model(self, architecture: str, hf_model_path: str):
+    def _load_hf_config(self, hf_model_path: str) -> dict:
+        """
+        Read and cache the HuggingFace config.json from a local model directory.
+        Cached so _nemo_to_hf can reuse it after hf_input_dir has been deleted.
+        """
+        if self._cached_hf_config is None:
+            config_path = Path(hf_model_path) / "config.json"
+            with open(config_path) as f:
+                self._cached_hf_config = json.load(f)
+        return self._cached_hf_config
+
+    @contextmanager
+    def _dtype_context(self, hf_config: dict):
+        """
+        Context manager that temporarily sets torch.set_default_dtype to match
+        the dtype declared in the HF config.json.
+
+        This is the correct way to control NeMo model tensor allocation dtype —
+        none of the NeMo model constructors (LlamaModel, MistralModel,
+        MixtralModel, Qwen2Model) accept a dtype argument. Without this,
+        NeMo defaults to float32, which causes the dtype mismatch assertion
+        in nemo/lightning/io/state.py to fire when loading bfloat16 weights.
+        """
+        hf_dtype_str = hf_config.get("torch_dtype", "bfloat16")
+        # HF sometimes stores values like "torch.bfloat16" – normalize to "bfloat16"
+        if isinstance(hf_dtype_str, str) and hf_dtype_str.startswith("torch."):
+            hf_dtype_str = hf_dtype_str.split(".", 1)[1]
+        dtype = getattr(torch, hf_dtype_str)  # "bfloat16" → torch.bfloat16
+
+        prev_dtype = torch.get_default_dtype()
+        logger.info(f"[dtype] Setting default dtype: {prev_dtype} → {dtype}")
+        torch.set_default_dtype(dtype)
+        try:
+            yield dtype
+        finally:
+            torch.set_default_dtype(prev_dtype)
+            logger.info(f"[dtype] Restored default dtype: {prev_dtype}")
+
+    def _build_nemo_model(self, architecture: str, hf_config: dict):
         """
         Build a NeMo model instance with config read directly from the
-        HuggingFace config.json. This avoids ZeroDivisionError from empty
-        default configs and works for any model size.
-        """
-        import json
-        
-        config_path = Path(hf_model_path) / "config.json"
-        with open(config_path) as f:
-            hf_config = json.load(f)
+        HuggingFace config dict. This ensures:
+          - No ZeroDivisionError from empty default NeMo configs
+          - Works for any model size without hardcoding
 
-        hidden_size        = hf_config["hidden_size"]
-        num_layers         = hf_config["num_hidden_layers"]
-        num_heads          = hf_config["num_attention_heads"]
-        num_kv_heads       = hf_config.get("num_key_value_heads", num_heads)
-        ffn_hidden_size    = hf_config["intermediate_size"]
-        vocab_size         = hf_config["vocab_size"]
-        max_position       = hf_config.get("max_position_embeddings", 4096)
+        dtype is NOT passed here — none of the NeMo model constructors accept
+        it as an argument. Callers must wrap this (and the import_ckpt /
+        export_ckpt calls) inside _dtype_context() so torch.set_default_dtype
+        controls tensor allocation with the correct dtype.
+
+        Args:
+            architecture: HF architecture string e.g. "Qwen2ForCausalLM"
+            hf_config:    Parsed config.json dict from the HF model directory
+        """
+        hidden_size     = hf_config["hidden_size"]
+        num_layers      = hf_config["num_hidden_layers"]
+        num_heads       = hf_config["num_attention_heads"]
+        num_kv_heads    = hf_config.get("num_key_value_heads", num_heads)
+        ffn_hidden_size = hf_config["intermediate_size"]
+        vocab_size      = hf_config["vocab_size"]
 
         if architecture == "LlamaForCausalLM":
             from nemo.collections.llm import LlamaConfig
@@ -158,6 +210,9 @@ class CompressionEngine:
 
         elif architecture == "MixtralForCausalLM":
             from nemo.collections.llm import MixtralConfig
+            # Mixtral-specific fields — read from config rather than assuming defaults
+            num_experts = hf_config.get("num_local_experts", 8)
+            top_k       = hf_config.get("num_experts_per_tok", 2)
             config = MixtralConfig(
                 hidden_size=hidden_size,
                 num_layers=num_layers,
@@ -175,31 +230,30 @@ class CompressionEngine:
 
     def _hf_to_nemo(
         self,
+        model_id: str,
         hf_model_path: str,
         architecture: str,
         output_path: str,
     ) -> None:
         """
         Convert a HuggingFace checkpoint to .nemo format using llm.import_ckpt.
-        The model class is looked up dynamically from the architecture string
-        so we never hardcode a specific model config (unlike the course example
-        which used llm.LlamaModel(llm.Llama32Config3B()) for a specific size).
-        Passing no config lets NeMo infer it from the checkpoint itself.
+        Wraps the conversion in _dtype_context so NeMo allocates tensors with
+        the correct dtype, avoiding the dtype mismatch assertion in state.py.
         """
-        model_class = ARCHITECTURE_TO_NEMO_MODEL[architecture]
-
         logger.info(
             f"[hf→nemo] Converting {architecture} from {hf_model_path} to {output_path}"
         )
 
-        nemo_model = self._build_nemo_model(architecture, hf_model_path)
+        hf_config = self._load_hf_config(hf_model_path)
 
-        llm.import_ckpt(
-            model=nemo_model,
-            source=f"hf://{hf_model_path}",
-            output_path=output_path,
-            overwrite=True,
-        )
+        with self._dtype_context(hf_config):
+            nemo_model = self._build_nemo_model(architecture, hf_config)
+            llm.import_ckpt(
+                model=nemo_model,
+                source=f"hf://{model_id}",
+                output_path=output_path,
+                overwrite=True,
+            )
 
         logger.info("[hf→nemo] Conversion complete.")
 
@@ -213,21 +267,30 @@ class CompressionEngine:
         Convert a .nemo checkpoint back to HuggingFace format using llm.export_ckpt.
         This is always the last step — the user receives a HF model they can
         use directly with transformers, upload to Hub, etc.
-        """
-        model_class = ARCHITECTURE_TO_NEMO_MODEL[architecture]
 
+        Uses the cached HF config (populated during _hf_to_nemo) so this works
+        even after hf_input_dir has been deleted by the cascade cleanup.
+        """
         logger.info(
             f"[nemo→hf] Converting {architecture} from {nemo_checkpoint} "
             f"to {output_path}"
         )
 
-        llm.export_ckpt(
-            model=model_class(),
-            source=nemo_checkpoint,
-            output_path=output_path,
-            target="hf",
-            overwrite=True,
-        )
+        if self._cached_hf_config is None:
+            raise RuntimeError(
+                "_nemo_to_hf called before _hf_to_nemo — HF config cache is empty. "
+                "This is a bug; run() always calls _hf_to_nemo first."
+            )
+
+        with self._dtype_context(self._cached_hf_config):
+            nemo_model = self._build_nemo_model(architecture, self._cached_hf_config)
+            llm.export_ckpt(
+                model=nemo_model,
+                source=nemo_checkpoint,
+                output_path=output_path,
+                target="hf",
+                overwrite=True,
+            )
 
         logger.info("[nemo→hf] Conversion complete.")
 
@@ -252,17 +315,17 @@ class CompressionEngine:
         Full end-to-end compression pipeline.
 
         Args:
-            model_id:              HuggingFace model ID e.g. "meta-llama/Llama-3.1-8B"
-            width_pruning_pct:     Fraction of layer params to remove via width pruning.
-            depth_pruning_pct:     Fraction of layers to remove via depth pruning.
-            do_pruning:            Whether to run pruning.
-            do_distillation:       Whether to run distillation after pruning.
-            do_quantization:       Whether to run quantization last.
-            dataset_path:          Optional dataset for pruning/distillation.
-                                   Falls back to default wikitext in S3 if None.
-            distillation_steps:    Training steps for distillation.
+            model_id:               HuggingFace model ID e.g. "meta-llama/Llama-3.1-8B"
+            width_pruning_pct:      Fraction of layer params to remove via width pruning.
+            depth_pruning_pct:      Fraction of layers to remove via depth pruning.
+            do_pruning:             Whether to run pruning.
+            do_distillation:        Whether to run distillation after pruning.
+            do_quantization:        Whether to run quantization last.
+            dataset_path:           Optional dataset for pruning/distillation.
+                                    Falls back to default wikitext in S3 if None.
+            distillation_steps:     Training steps for distillation.
             quantization_algorithm: Quantization algorithm (fp8, int8_sq, etc.)
-            seq_length:            Sequence length for pruning/distillation.
+            seq_length:             Sequence length for pruning/distillation.
 
         Returns:
             {
@@ -273,7 +336,7 @@ class CompressionEngine:
         self._setup_dirs()
 
         # ------------------------------------------------------------------
-        # Step 0: download model from HuggingFace Hub to local storage
+        # Step 0: Download model from HuggingFace Hub to local /tmp/hf_input
         # ------------------------------------------------------------------
         logger.info(f"[pipeline] Downloading {model_id} from HuggingFace Hub")
         snapshot_download(
@@ -282,6 +345,7 @@ class CompressionEngine:
             ignore_patterns=["*.md", "*.txt"],
         )
         logger.info("[pipeline] Download complete")
+
         # ------------------------------------------------------------------
         # Step 1: Detect architecture and validate
         # ------------------------------------------------------------------
@@ -308,11 +372,13 @@ class CompressionEngine:
         )
 
         # ------------------------------------------------------------------
-        # Step 3: Download HF weights and convert to .nemo
+        # Step 3: Convert HF weights → .nemo
+        # Also populates self._cached_hf_config for use in _nemo_to_hf later.
         # Cascade step 1: HF weights → .nemo → delete HF weights
         # ------------------------------------------------------------------
         logger.info("[pipeline] Converting HF → NeMo")
         self._hf_to_nemo(
+            model_id=model_id,
             hf_model_path=str(self.hf_input_dir),
             architecture=architecture,
             output_path=str(self.nemo_input_dir),
@@ -322,8 +388,8 @@ class CompressionEngine:
 
         # ------------------------------------------------------------------
         # Step 4: Keep a reference to the teacher checkpoint BEFORE compression
-        # This is the distillation exception — teacher must stay alive
-        # throughout gpt_train.py and is only deleted after distillation ends.
+        # Distillation exception: teacher must stay alive throughout gpt_train.py
+        # and is only deleted after distillation completes.
         # ------------------------------------------------------------------
         teacher_checkpoint = str(self.nemo_input_dir) if do_distillation else None
 
@@ -352,13 +418,13 @@ class CompressionEngine:
 
         # ------------------------------------------------------------------
         # Step 6: Cascade cleanup of input .nemo
-        # Now that compression is done, the original .nemo is no longer needed
-        # (distillation has finished so teacher is safe to delete too).
+        # Distillation is done so teacher is safe to delete too.
         # ------------------------------------------------------------------
         self._cleanup(self.nemo_input_dir, "nemo_input")
 
         # ------------------------------------------------------------------
         # Step 7: Convert compressed .nemo → HuggingFace
+        # Uses cached HF config — hf_input_dir is already gone at this point.
         # Cascade step 3: compressed .nemo → HF → delete compressed .nemo
         # ------------------------------------------------------------------
         logger.info("[pipeline] Converting NeMo → HF")
@@ -367,7 +433,6 @@ class CompressionEngine:
             architecture=architecture,
             output_path=str(self.hf_output_dir),
         )
-        # Compressed .nemo no longer needed once HF export is done
         self._cleanup(self.nemo_output_dir, "nemo_output")
 
         logger.info(
